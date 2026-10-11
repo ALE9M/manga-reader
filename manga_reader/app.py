@@ -509,6 +509,7 @@ class MangaReaderWindow(QMainWindow):
         self.remove_button.setEnabled(not busy and has_selection)
         self.clear_button.setEnabled(not busy and bool(self.regions))
         self.region_list.setEnabled(not busy and self.page_image is not None)
+        self.canvas.setEnabled(not busy and self.page_image is not None)
         self.text_editor.setEnabled(not busy and has_selection and self.page_image is not None)
         self.ocr_selected_button.setEnabled(not busy and has_selection)
         self.ocr_all_button.setEnabled(not busy and bool(self.regions))

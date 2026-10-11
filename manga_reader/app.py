@@ -312,23 +312,42 @@ class MangaReaderWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 return
 
-        default_repo = str(self.settings.value("detector/repository", str(Path.home() / "comic-text-detector")))
-        repository = QFileDialog.getExistingDirectory(
-            self, "Seleziona la cartella comic-text-detector", default_repo
+        # Prefer the files installed by setup_windows.bat; then try remembered paths.
+        project_root = Path(__file__).resolve().parent.parent
+        bundled_repo = project_root / "vendor" / "comic-text-detector"
+        remembered_repo = Path(str(self.settings.value("detector/repository", "")))
+        repo_candidates = [
+            bundled_repo,
+            remembered_repo,
+            Path.home() / "comic-text-detector",
+        ]
+        repo_path = next(
+            (p for p in repo_candidates if str(p) and (p / "inference.py").is_file()),
+            None,
         )
-        if not repository:
-            return
-        if not (Path(repository) / "inference.py").is_file():
+        if repo_path is None:
+            selected_repo = QFileDialog.getExistingDirectory(
+                self,
+                "Seleziona la cartella comic-text-detector",
+                str(remembered_repo if remembered_repo.is_dir() else Path.home()),
+            )
+            if not selected_repo:
+                return
+            repo_path = Path(selected_repo)
+        if not (repo_path / "inference.py").is_file():
             QMessageBox.warning(
                 self, "Cartella non valida",
                 "La cartella selezionata non contiene inference.py. Clona il repository "
                 "https://github.com/dmMaze/comic-text-detector e seleziona la cartella radice."
             )
             return
+        repository = str(repo_path)
         self.settings.setValue("detector/repository", repository)
 
         saved_model = str(self.settings.value("detector/model", ""))
         candidates = [
+            project_root / "models" / "comictextdetector.pt.onnx",
+            project_root / "models" / "comictextdetector.pt",
             Path(saved_model) if saved_model else None,
             Path(repository) / "data" / "comictextdetector.pt.onnx",
             Path(repository) / "data" / "comictextdetector.pt",

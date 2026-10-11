@@ -16,17 +16,34 @@ Applicazione desktop Python per individuare automaticamente blocchi di testo nel
 - Esportazione del testo in un file `.txt` UTF-8 secondo l'ordine corrente; le regioni vuote vengono ignorate.
 - La cartella del detector e il percorso del modello vengono ricordati tra gli avvii.
 
-## Installazione su Windows
+## Installazione semplice (Windows)
 
-È consigliato Python 3.11 in un ambiente virtuale. I modelli AI richiedono spazio su disco; il primo avvio di `manga-ocr` può scaricare il proprio modello.
+Se non sei pratico di Python, **non devi digitare i comandi qui sotto**. Il progetto include uno script che prepara automaticamente l'ambiente, installa le librerie, scarica il detector e il suo modello.
+
+1. Installa [Python 3.11 per Windows](https://www.python.org/downloads/windows/) una sola volta. Durante l'installazione lascia attivo il Python Launcher.
+2. Scarica il progetto con **Code → Download ZIP** e decomprimi la cartella.
+3. Fai doppio clic su `setup_windows.bat` e attendi: la procedura scarica i componenti necessari. Potrebbe impiegare un po' di tempo e usare diversi GB durante l'installazione delle librerie.
+4. Per gli utilizzi successivi fai doppio clic su `Avvia_Manga_Reader.bat`.
+5. Apri una pagina e premi **Rileva aree testo…**. Il programma troverà automaticamente il detector e il modello installati; non devi selezionare manualmente percorsi o checkpoint.
+
+La prima installazione richiede internet e scarica PyTorch, il codice del detector e un modello ONNX (circa 95 MB). Al primo OCR, `manga-ocr` può scaricare anche il proprio modello. Le pagine manga restano sul tuo computer e non vengono inviate a un servizio web.
+
+**Se Windows mostra un avviso di sicurezza**, verifica che tu abbia scaricato il progetto dal repository ufficiale. Lo script usa PowerShell per scaricare dipendenze e modelli dai rispettivi progetti upstream.
+
+### Installazione manuale / sviluppatori
+
+Se preferisci installare le dipendenze manualmente:
 
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
+pip install -r requirements-detector.txt
 python main.py
 ```
+
 
 ## Abilitare il rilevamento automatico
 
@@ -53,7 +70,7 @@ python main.py
 
    Salva il file dove preferisci, ad esempio in `C:\AI\models\comictextdetector.pt.onnx`. Non aggiungere i pesi al repository Git: sono file grandi e artefatti di terze parti.
 
-4. Avvia Manga Reader, apri una pagina, poi premi **Rileva aree testo…**. Seleziona la cartella che contiene `inference.py` e il checkpoint scaricato. Questi percorsi vengono salvati nelle impostazioni locali.
+4. Dopo `setup_windows.bat`, il codice è disponibile in `vendor/comic-text-detector` e il checkpoint in `models/comictextdetector.pt.onnx`. La GUI rileva automaticamente questi percorsi. Se hai installato il detector manualmente altrove, puoi ancora selezionare a mano la cartella e il checkpoint.
 5. Rivedi le regioni rilevate: elimina falsi positivi, disegna a mano le aree mancanti e riordina le voci per correggere l'ordine di lettura. Quindi premi **OCR di tutte le regioni**, verifica il giapponese e usa **Esporta .txt**.
 
 Il rilevamento viene eseguito in un thread separato per non bloccare la finestra. Il primo caricamento del modello può richiedere tempo. Se il detector fallisce, l'applicazione visualizza un messaggio e consente di tornare alla delimitazione manuale.

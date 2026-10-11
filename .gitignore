@@ -17,13 +17,9 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# OCR/model caches and temporary exports
+# Model files and third-party code downloaded by setup_windows.ps1
+models/*.pt
+models/*.pth
+models/*.onnx
+vendor/
 .cache/
-*.tmp
-
-# Third-party model weights / clones (never commit these large files)
-*.pt
-*.pth
-*.onnx
-models/
-comic-text-detector/

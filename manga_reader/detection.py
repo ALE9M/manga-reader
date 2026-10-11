@@ -46,9 +46,9 @@ def detect_comic_text(image: Image.Image, repository_dir: str | Path,
                       model_path: str | Path) -> list[Box]:
     """Detect comic text blocks using the upstream TextDetector API.
 
-    \`comic-text-detector\` does not expose a normal pip API. The upstream README
+    `comic-text-detector` does not expose a normal pip API. The upstream README
     instructs users to clone its repository and download a checkpoint. The
-    adapter calls its documented \`TextDetector(model_path=..., ...)\` class and
+    adapter calls its documented `TextDetector(model_path=..., ...)` class and
     uses the returned TextBlock.xyxy rectangles.
     """
     repository = Path(repository_dir).expanduser().resolve()

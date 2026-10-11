@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "manga-reader-jp"
+version = "0.2.0"
+description = "Desktop GUI for Japanese manga OCR, automatic text detection, and reading-order editing"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+
+[project.scripts]
+manga-reader = "manga_reader.app:main"
+
+[tool.setuptools.packages.find]
+include = ["manga_reader*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,9 @@
+# Install after requirements.txt, in the same virtual environment.
+# Install torch + torchvision separately using https://pytorch.org/get-started/locally/
+# Choose the correct CPU/CUDA build for your system before running this file.
+-r requirements.txt
+numpy>=1.24
+opencv-python>=4.8
+shapely>=1.8
+tqdm>=4.65
+torchsummary

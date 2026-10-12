@@ -51,13 +51,17 @@ if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Installazione delle dipendenze del 
 Write-Host "[4/5] Scarico il detector manga..."
 $VendorRoot = Join-Path $ProjectRoot "vendor"
 $DetectorRoot = Join-Path $VendorRoot "comic-text-detector"
+$Extracted = Join-Path $VendorRoot "comic-text-detector-master"
 $DetectorZip = Join-Path $env:TEMP "manga-reader-comic-text-detector.zip"
 New-Item -ItemType Directory -Force -Path $VendorRoot | Out-Null
 if (-not (Test-Path (Join-Path $DetectorRoot "inference.py"))) {
     if (Test-Path $DetectorRoot) { Remove-Item -Recurse -Force $DetectorRoot }
+    if (Test-Path $Extracted) { Remove-Item -Recurse -Force $Extracted }
     Invoke-WebRequest -Uri "https://github.com/dmMaze/comic-text-detector/archive/refs/heads/master.zip" -OutFile $DetectorZip
-    Expand-Archive -LiteralPath $DetectorZip -DestinationPath $VendorRoot -Force
-    $Extracted = Join-Path $VendorRoot "comic-text-detector-master"
+    # Use .NET directly instead of Expand-Archive, which can fail if the
+    # Microsoft.PowerShell.Archive module cannot be loaded on some Windows installs.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($DetectorZip, $VendorRoot)
     if (-not (Test-Path (Join-Path $Extracted "inference.py"))) {
         Stop-WithMessage "Il download del repository detector non ha prodotto la struttura attesa. Controlla la connessione e riprova."
     }

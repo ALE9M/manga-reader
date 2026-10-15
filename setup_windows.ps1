@@ -51,7 +51,7 @@ Write-Host "[2/4] Installo le dipendenze con versioni compatibili..."
 & $VenvPython -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Aggiornamento di pip non riuscito." }
 
-# Remove stale OpenCV versions previously pulled in by comic-text-detector.
+# Remove stale OpenCV variants from previous installations; the new detector does not use OpenCV.
 # The new ONNX detector does not use OpenCV, and OpenCV 5 requires NumPy 2.x.
 & $VenvPython -m pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless
 
@@ -77,14 +77,13 @@ $ModelsRoot = Join-Path $ProjectRoot "models"
 $ModelPath = Join-Path $ModelsRoot "yolo26n.onnx"
 $ModelUrl = "https://huggingface.co/Kiuyha/Manga-Bubble-YOLO/resolve/fb646500455e8a8a3a807fd27b855c8e4fc63766/onnx/yolo26n.onnx?download=true"
 New-Item -ItemType Directory -Force -Path $ModelsRoot | Out-Null
-if (-not (Test-Path $ModelPath) -or (Get-Item $ModelPath).Length -lt 1000000) {
+# Replace any existing copy so reinstallations always use the pinned model revision.
+Remove-Item -Force -ErrorAction SilentlyContinue $ModelPath
+try {
+    Invoke-WebRequest -Uri $ModelUrl -OutFile $ModelPath -UseBasicParsing
+} catch {
     Remove-Item -Force -ErrorAction SilentlyContinue $ModelPath
-    try {
-        Invoke-WebRequest -Uri $ModelUrl -OutFile $ModelPath -UseBasicParsing
-    } catch {
-        Remove-Item -Force -ErrorAction SilentlyContinue $ModelPath
-        Stop-WithMessage "Download del modello non riuscito. Controlla la connessione e riprova. Dettaglio: $($_.Exception.Message)"
-    }
+    Stop-WithMessage "Download del modello non riuscito. Controlla la connessione e riprova. Dettaglio: $($_.Exception.Message)"
 }
 if (-not (Test-Path $ModelPath) -or (Get-Item $ModelPath).Length -lt 1000000) {
     Stop-WithMessage "Il modello scaricato e' incompleto o non valido. Riprova con una connessione internet stabile."

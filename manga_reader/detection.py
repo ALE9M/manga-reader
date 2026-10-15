@@ -1,18 +1,15 @@
-"""Adapter for dmMaze/comic-text-detector.
-
-The detector is intentionally an external checkout: we do not vendor its GPL-3.0
-source or distribute its pretrained weights inside this repository.
-"""
+"""Manga-Bubble-YOLO text detection using ONNX Runtime (CPU)."""
 from __future__ import annotations
 
-import importlib
-import sys
+import math
 from pathlib import Path
 from typing import Iterable
 
 from PIL import Image
 
 Box = tuple[int, int, int, int]  # x, y, width, height
+INPUT_SIZE = 1280
+DEFAULT_CONFIDENCE = 0.25
 
 
 def normalize_xyxy(raw_boxes: Iterable[Iterable[float]], width: int, height: int) -> list[Box]:
@@ -30,80 +27,111 @@ def normalize_xyxy(raw_boxes: Iterable[Iterable[float]], width: int, height: int
         if right - left < 8 or bottom - top < 8:
             continue
         box = (left, top, right - left, bottom - top)
-        # Some detector versions can yield the same block more than once.
         if any(all(abs(a - b) <= 2 for a, b in zip(box, old)) for old in result):
             continue
         result.append(box)
 
-    # A helpful default for Japanese pages: top-to-bottom, and right-to-left
-    # for blocks at approximately the same vertical position. It is only a
-    # starting order; the UI deliberately leaves final ordering to the user.
+    # Suggested manga reading order: top-to-bottom, right-to-left within rows.
     result.sort(key=lambda b: (b[1], -b[0]))
     return result
 
 
-def detect_comic_text(image: Image.Image, repository_dir: str | Path,
-                      model_path: str | Path) -> list[Box]:
-    """Detect comic text blocks using the upstream TextDetector API.
+def decode_yolo26_output(
+    raw_output,
+    width: int,
+    height: int,
+    confidence_threshold: float = DEFAULT_CONFIDENCE,
+) -> list[Box]:
+    """Convert YOLO26 ONNX output (1, 300, 6) into original-page boxes.
 
-    `comic-text-detector` does not expose a normal pip API. The upstream README
-    instructs users to clone its repository and download a checkpoint. The
-    adapter calls its documented `TextDetector(model_path=..., ...)` class and
-    uses the returned TextBlock.xyxy rectangles.
+    Each prediction row is [x1, y1, x2, y2, confidence, class_id]. The published
+    Manga-Bubble-YOLO model is a single-class text detector. Its model card uses
+    a 1280x1280 resized input and reports output coordinates in input pixels.
     """
-    repository = Path(repository_dir).expanduser().resolve()
-    checkpoint = Path(model_path).expanduser().resolve()
-    if not (repository / "inference.py").is_file():
-        raise RuntimeError(
-            "Cartella comic-text-detector non valida: non trovo inference.py. "
-            "Clona https://github.com/dmMaze/comic-text-detector e seleziona la cartella corretta."
-        )
-    if not checkpoint.is_file():
-        raise RuntimeError("Checkpoint del modello non trovato: seleziona un file .pt o .onnx.")
-
-    import cv2
     import numpy as np
-    import torch
 
-    old_sys_path = list(sys.path)
-    sys.path.insert(0, str(repository))
-    try:
-        # The upstream code uses root-level imports (basemodel, utils, models).
-        # Import it only after making the cloned repository importable.
-        importlib.invalidate_caches()
-        inference = importlib.import_module("inference")
-        detector_class = getattr(inference, "TextDetector", None)
-        if detector_class is None:
+    predictions = np.asarray(raw_output)
+    if predictions.ndim == 3:
+        if predictions.shape[0] != 1:
             raise RuntimeError(
-                "Versione incompatibile di comic-text-detector: la classe TextDetector non è presente."
+                f"Output del modello non supportato: batch {predictions.shape[0]}, atteso 1."
             )
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        detector = detector_class(
-            model_path=str(checkpoint), input_size=1024, device=device, act="leaky"
+        predictions = predictions[0]
+    if predictions.ndim != 2 or predictions.shape[1] < 6:
+        raise RuntimeError(
+            f"Output del modello non riconosciuto: shape {predictions.shape}; attesa (300, 6)."
         )
-        # Upstream preprocess_img expects BGR and converts it to RGB internally.
-        rgb = np.asarray(image.convert("RGB"))
-        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        try:
-            from utils.textmask import REFINEMASK_ANNOTATION
-            _mask, _refined_mask, blocks = detector(
-                bgr, refine_mode=REFINEMASK_ANNOTATION, keep_undetected_mask=False
-            )
-        except ImportError:
-            _mask, _refined_mask, blocks = detector(bgr)
 
-        coordinates = []
-        for block in blocks or []:
-            box = getattr(block, "xyxy", None)
-            if box is not None and len(box) >= 4:
-                coordinates.append(box[:4])
-        return normalize_xyxy(coordinates, image.width, image.height)
+    coords = predictions[:, :4].astype(float, copy=True)
+    # Also tolerate normalized xyxy output from compatible model exports.
+    finite_coords = np.abs(coords[np.isfinite(coords)])
+    if finite_coords.size and float(finite_coords.max()) <= 2.0:
+        coords *= INPUT_SIZE
+
+    x_scale = width / INPUT_SIZE
+    y_scale = height / INPUT_SIZE
+    boxes = []
+    for row, (x1, y1, x2, y2) in zip(predictions, coords):
+        try:
+            score = float(row[4])
+            values = (float(x1), float(y1), float(x2), float(y2))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(score) or score < confidence_threshold:
+            continue
+        if not all(math.isfinite(value) for value in values):
+            continue
+        # The released model identifies text regions (one class); class_id is
+        # retained in the output contract but does not require filtering.
+        boxes.append(
+            (values[0] * x_scale, values[1] * y_scale,
+             values[2] * x_scale, values[3] * y_scale)
+        )
+    return normalize_xyxy(boxes, width, height)
+
+
+def detect_manga_text(image: Image.Image, model_path: str | Path) -> list[Box]:
+    """Detect manga text regions with Manga-Bubble-YOLO's ONNX model."""
+    checkpoint = Path(model_path).expanduser().resolve()
+    if not checkpoint.is_file():
+        raise RuntimeError(
+            f"Modello Manga-Bubble-YOLO non trovato: {checkpoint}. "
+            "Esegui setup_windows.bat per scaricare il modello."
+        )
+    if checkpoint.suffix.lower() != ".onnx":
+        raise RuntimeError("Manga Reader richiede il modello ONNX yolo26n.onnx.")
+
+    try:
+        import numpy as np
+        import onnxruntime as ort
+    except ImportError as exc:
+        raise RuntimeError(
+            "Mancano le dipendenze del rilevatore ONNX. Esegui setup_windows.bat."
+        ) from exc
+
+    try:
+        # Match the model card's preprocessing. The model is trained/instructed
+        # with a square resize (not letterboxing), then RGB NCHW float32 [0, 1].
+        resized = image.convert("RGB").resize(
+            (INPUT_SIZE, INPUT_SIZE), Image.Resampling.BILINEAR
+        )
+        tensor = np.asarray(resized, dtype=np.float32) / 255.0
+        tensor = np.transpose(tensor, (2, 0, 1))[None, ...]
+
+        session = ort.InferenceSession(
+            str(checkpoint), providers=["CPUExecutionProvider"]
+        )
+        inputs = session.get_inputs()
+        if not inputs:
+            raise RuntimeError("Il modello ONNX non dichiara input utilizzabili.")
+        outputs = session.run(None, {inputs[0].name: tensor})
+        if not outputs:
+            raise RuntimeError("Il modello ONNX non ha restituito predizioni.")
+        return decode_yolo26_output(outputs[0], image.width, image.height)
     except RuntimeError:
         raise
     except Exception as exc:
         raise RuntimeError(
-            f"comic-text-detector non è riuscito a elaborare la pagina: {type(exc).__name__}: {exc}. "
-            "Verifica dipendenze, checkpoint e versione del repository upstream."
+            "Manga-Bubble-YOLO non è riuscito a elaborare la pagina: "
+            f"{type(exc).__name__}: {exc}. Verifica il modello ONNX e le dipendenze."
         ) from exc
-    finally:
-        sys.path[:] = old_sys_path

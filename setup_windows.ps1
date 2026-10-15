@@ -11,84 +11,93 @@ function Stop-WithMessage([string]$Message) {
     exit 1
 }
 
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  Installazione Manga Reader" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Questa procedura installa automaticamente le dipendenze e scarica i modelli."
-Write-Host "E' necessaria una connessione internet; il download complessivo puo' essere grande."
+Write-Host "Richiesto Python 3.11 a 64 bit."
+Write-Host "Il rilevamento usa Manga-Bubble-YOLO ONNX; PyTorch resta necessario per manga-ocr."
 Write-Host ""
 
 $PyLauncher = Get-Command py -ErrorAction SilentlyContinue
 if (-not $PyLauncher) {
-    Stop-WithMessage "Non trovo il launcher Python (py). Installa Python 3.11 da https://www.python.org/downloads/windows/ e seleziona 'Install launcher' durante l'installazione. Poi esegui di nuovo setup_windows.bat."
+    Stop-WithMessage "Non trovo il launcher Python (py). Installa Python 3.11 a 64 bit da https://www.python.org/downloads/windows/ e seleziona 'Install launcher'."
 }
 & py -3.11 --version
 if ($LASTEXITCODE -ne 0) {
-    Stop-WithMessage "Python 3.11 non risulta installato. Installa Python 3.11 da https://www.python.org/downloads/windows/ e poi esegui di nuovo setup_windows.bat."
+    Stop-WithMessage "Python 3.11 non risulta installato. Installa Python 3.11 a 64 bit e poi esegui di nuovo setup_windows.bat."
+}
+$PythonBits = (& py -3.11 -c "import struct; print(struct.calcsize('P') * 8)") -join ""
+if ($PythonBits.Trim() -ne "64") {
+    Stop-WithMessage "È installato Python 3.11 a 32 bit. Manga Reader richiede Python 3.11 a 64 bit."
 }
 
 if (-not (Test-Path $VenvPython)) {
-    Write-Host "[1/5] Creo l'ambiente Python locale..."
+    Write-Host "[1/4] Creo l'ambiente virtuale Python..."
     & py -3.11 -m venv (Join-Path $ProjectRoot ".venv")
     if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Non riesco a creare l'ambiente virtuale." }
 } else {
-    Write-Host "[1/5] Ambiente Python gia' presente."
-}
-
-Write-Host "[2/5] Aggiorno pip..."
-& $VenvPython -m pip install --upgrade pip
-if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Aggiornamento pip non riuscito. Controlla la connessione internet." }
-
-Write-Host "[3/5] Installo PyTorch CPU e le dipendenze dell'applicazione..."
-& $VenvPython -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Installazione di PyTorch non riuscita." }
-& $VenvPython -m pip install -r (Join-Path $ProjectRoot "requirements.txt")
-if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Installazione delle dipendenze base non riuscita." }
-& $VenvPython -m pip install -r (Join-Path $ProjectRoot "requirements-detector.txt")
-if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Installazione delle dipendenze del detector non riuscita." }
-
-Write-Host "[4/5] Scarico il detector manga..."
-$VendorRoot = Join-Path $ProjectRoot "vendor"
-$DetectorRoot = Join-Path $VendorRoot "comic-text-detector"
-$Extracted = Join-Path $VendorRoot "comic-text-detector-master"
-$DetectorZip = Join-Path $env:TEMP "manga-reader-comic-text-detector.zip"
-New-Item -ItemType Directory -Force -Path $VendorRoot | Out-Null
-if (-not (Test-Path (Join-Path $DetectorRoot "inference.py"))) {
-    if (Test-Path $DetectorRoot) { Remove-Item -Recurse -Force $DetectorRoot }
-    if (Test-Path $Extracted) { Remove-Item -Recurse -Force $Extracted }
-    Invoke-WebRequest -Uri "https://github.com/dmMaze/comic-text-detector/archive/refs/heads/master.zip" -OutFile $DetectorZip
-    # Use .NET directly instead of Expand-Archive, which can fail if the
-    # Microsoft.PowerShell.Archive module cannot be loaded on some Windows installs.
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($DetectorZip, $VendorRoot)
-    if (-not (Test-Path (Join-Path $Extracted "inference.py"))) {
-        Stop-WithMessage "Il download del repository detector non ha prodotto la struttura attesa. Controlla la connessione e riprova."
+    Write-Host "[1/4] Ambiente virtuale gia' presente."
+    & $VenvPython -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)"
+    if ($LASTEXITCODE -ne 0) {
+        Stop-WithMessage "L'ambiente .venv esistente non usa Python 3.11. Elimina la cartella .venv e riesegui setup_windows.bat."
     }
-    if (Test-Path $DetectorRoot) { Remove-Item -Recurse -Force $DetectorRoot }
-    Move-Item -LiteralPath $Extracted -Destination $DetectorRoot
-    Remove-Item -Force -ErrorAction SilentlyContinue $DetectorZip
-} else {
-    Write-Host "  Detector gia' presente; salto il download."
-}
-
-Write-Host "[5/5] Scarico il modello pretrained ONNX..."
-$ModelsRoot = Join-Path $ProjectRoot "models"
-$ModelPath = Join-Path $ModelsRoot "comictextdetector.pt.onnx"
-New-Item -ItemType Directory -Force -Path $ModelsRoot | Out-Null
-if (-not (Test-Path $ModelPath) -or (Get-Item $ModelPath).Length -lt 10000000) {
-    Remove-Item -Force -ErrorAction SilentlyContinue $ModelPath
-    Invoke-WebRequest -Uri "https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.2.1/comictextdetector.pt.onnx" -OutFile $ModelPath
-    if (-not (Test-Path $ModelPath) -or (Get-Item $ModelPath).Length -lt 10000000) {
-        Stop-WithMessage "Il modello non e' stato scaricato correttamente. Riprova con una connessione internet stabile."
-    }
-} else {
-    Write-Host "  Modello gia' presente; salto il download."
 }
 
 Write-Host ""
-Write-Host "Installazione completata!" -ForegroundColor Green
-Write-Host "Adesso puoi avviare il programma con Avvia_Manga_Reader.bat."
-Write-Host "Al primo avvio manga-ocr potrebbe scaricare il proprio modello."
+Write-Host "[2/4] Installo le dipendenze con versioni compatibili..."
+& $VenvPython -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Aggiornamento di pip non riuscito." }
+
+# Remove stale OpenCV versions previously pulled in by comic-text-detector.
+# The new ONNX detector does not use OpenCV, and OpenCV 5 requires NumPy 2.x.
+& $VenvPython -m pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless
+
+Write-Host "  Installo PyTorch CPU per manga-ocr..."
+& $VenvPython -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Installazione di PyTorch CPU non riuscita." }
+
+& $VenvPython -m pip install -r (Join-Path $ProjectRoot "requirements.txt")
+if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Installazione delle dipendenze di Manga Reader non riuscita." }
+& $VenvPython -m pip install -r (Join-Path $ProjectRoot "requirements-detector.txt")
+if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Installazione delle dipendenze ONNX non riuscita." }
+
+Write-Host "  Controllo la coerenza delle dipendenze..."
+& $VenvPython -m pip check
+if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Sono presenti conflitti tra pacchetti. Copia il messaggio pip check per poterli correggere." }
+
+& $VenvPython -c "import numpy, onnxruntime, torch, PySide6; from manga_ocr import MangaOcr; print('NumPy', numpy.__version__, '| ONNX Runtime', onnxruntime.__version__, '| PyTorch', torch.__version__)"
+if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Una o piu' librerie non si importano correttamente. Copia il messaggio di errore per la diagnosi." }
+
+Write-Host ""
+Write-Host "[3/4] Scarico il modello Manga-Bubble-YOLO (ONNX)..."
+$ModelsRoot = Join-Path $ProjectRoot "models"
+$ModelPath = Join-Path $ModelsRoot "yolo26n.onnx"
+$ModelUrl = "https://huggingface.co/Kiuyha/Manga-Bubble-YOLO/resolve/fb646500455e8a8a3a807fd27b855c8e4fc63766/onnx/yolo26n.onnx?download=true"
+New-Item -ItemType Directory -Force -Path $ModelsRoot | Out-Null
+if (-not (Test-Path $ModelPath) -or (Get-Item $ModelPath).Length -lt 1000000) {
+    Remove-Item -Force -ErrorAction SilentlyContinue $ModelPath
+    try {
+        Invoke-WebRequest -Uri $ModelUrl -OutFile $ModelPath -UseBasicParsing
+    } catch {
+        Remove-Item -Force -ErrorAction SilentlyContinue $ModelPath
+        Stop-WithMessage "Download del modello non riuscito. Controlla la connessione e riprova. Dettaglio: $($_.Exception.Message)"
+    }
+}
+if (-not (Test-Path $ModelPath) -or (Get-Item $ModelPath).Length -lt 1000000) {
+    Stop-WithMessage "Il modello scaricato e' incompleto o non valido. Riprova con una connessione internet stabile."
+}
+
+Write-Host "  Verifico che ONNX Runtime riesca a caricare il modello..."
+$ModelPathForPython = $ModelPath.Replace("\", "\\")
+& $VenvPython -c "import onnxruntime as ort; ort.InferenceSession(r'$ModelPathForPython', providers=['CPUExecutionProvider']); print('Modello ONNX verificato')"
+if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Il file del modello non e' caricabile. Riprova il download o segnala l'errore." }
+
+Write-Host ""
+Write-Host "[4/4] Installazione completata!" -ForegroundColor Green
+Write-Host "Avvia Manga Reader con Avvia_Manga_Reader.bat."
+Write-Host "Il modello OCR di manga-ocr potrebbe essere scaricato al primo utilizzo."
 Write-Host ""
 Read-Host "Premi Invio per chiudere"

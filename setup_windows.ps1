@@ -91,8 +91,7 @@ if (-not (Test-Path $ModelPath) -or (Get-Item $ModelPath).Length -lt 1000000) {
 }
 
 Write-Host "  Verifico che ONNX Runtime riesca a caricare il modello..."
-$ModelPathForPython = $ModelPath.Replace("\", "\\")
-& $VenvPython -c "import onnxruntime as ort; ort.InferenceSession(r'$ModelPathForPython', providers=['CPUExecutionProvider']); print('Modello ONNX verificato')"
+& $VenvPython -c "import onnxruntime as ort, sys; ort.InferenceSession(sys.argv[1], providers=['CPUExecutionProvider']); print('Modello ONNX verificato')" "$ModelPath"
 if ($LASTEXITCODE -ne 0) { Stop-WithMessage "Il file del modello non e' caricabile. Riprova il download o segnala l'errore." }
 
 Write-Host ""

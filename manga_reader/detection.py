@@ -44,51 +44,71 @@ def decode_yolo26_output(
 ) -> list[Box]:
     """Convert YOLO26 ONNX output (1, 300, 6) into original-page boxes.
 
-    Each prediction row is [x1, y1, x2, y2, confidence, class_id]. The published
-    Manga-Bubble-YOLO model is a single-class text detector. Its model card uses
-    a 1280x1280 resized input and reports output coordinates in input pixels.
+    Each prediction row is [x1, y1, x2, y2, confidence, class_id]. This parser
+    deliberately uses only Python built-ins, so its unit tests do not need the
+    heavy inference dependencies installed.
     """
-    import numpy as np
+    # ONNX Runtime returns NumPy arrays, while unit tests can use plain lists.
+    if hasattr(raw_output, "tolist"):
+        predictions = raw_output.tolist()
+    else:
+        predictions = raw_output
+    if not isinstance(predictions, (list, tuple)) or not predictions:
+        return []
 
-    predictions = np.asarray(raw_output)
-    if predictions.ndim == 3:
-        if predictions.shape[0] != 1:
+    # Accept the model's batch-one output shape (1, N, 6) and test/direct N x 6.
+    first = predictions[0]
+    if (
+        isinstance(first, (list, tuple))
+        and first
+        and isinstance(first[0], (list, tuple))
+    ):
+        if len(predictions) != 1:
             raise RuntimeError(
-                f"Output del modello non supportato: batch {predictions.shape[0]}, atteso 1."
+                f"Output del modello non supportato: batch {len(predictions)}, atteso 1."
             )
-        predictions = predictions[0]
-    if predictions.ndim != 2 or predictions.shape[1] < 6:
-        raise RuntimeError(
-            f"Output del modello non riconosciuto: shape {predictions.shape}; attesa (300, 6)."
-        )
+        predictions = first
 
-    coords = predictions[:, :4].astype(float, copy=True)
+    if not isinstance(predictions, (list, tuple)):
+        raise RuntimeError("Output del modello non riconosciuto.")
+    if not predictions:
+        return []
+    if any(not isinstance(row, (list, tuple)) or len(row) < 6 for row in predictions):
+        raise RuntimeError("Output del modello non riconosciuto: attese righe con 6 valori.")
+
+    parsed_rows = []
+    finite_coords = []
+    for row in predictions:
+        try:
+            values = [float(value) for value in row[:6]]
+        except (TypeError, ValueError):
+            continue
+        parsed_rows.append(values)
+        for value in values[:4]:
+            if math.isfinite(value):
+                finite_coords.append(abs(value))
+
     # Also tolerate normalized xyxy output from compatible model exports.
-    finite_coords = np.abs(coords[np.isfinite(coords)])
-    if finite_coords.size and float(finite_coords.max()) <= 2.0:
-        coords *= INPUT_SIZE
-
+    coord_scale = INPUT_SIZE if finite_coords and max(finite_coords) <= 2.0 else 1.0
     x_scale = width / INPUT_SIZE
     y_scale = height / INPUT_SIZE
     boxes = []
-    for row, (x1, y1, x2, y2) in zip(predictions, coords):
-        try:
-            score = float(row[4])
-            values = (float(x1), float(y1), float(x2), float(y2))
-        except (TypeError, ValueError):
-            continue
+    for row in parsed_rows:
+        x1, y1, x2, y2, score, _class_id = row
         if not math.isfinite(score) or score < confidence_threshold:
             continue
-        if not all(math.isfinite(value) for value in values):
+        coords = (x1, y1, x2, y2)
+        if not all(math.isfinite(value) for value in coords):
             continue
-        # The released model identifies text regions (one class); class_id is
-        # retained in the output contract but does not require filtering.
         boxes.append(
-            (values[0] * x_scale, values[1] * y_scale,
-             values[2] * x_scale, values[3] * y_scale)
+            (
+                x1 * coord_scale * x_scale,
+                y1 * coord_scale * y_scale,
+                x2 * coord_scale * x_scale,
+                y2 * coord_scale * y_scale,
+            )
         )
     return normalize_xyxy(boxes, width, height)
-
 
 def detect_manga_text(image: Image.Image, model_path: str | Path) -> list[Box]:
     """Detect manga text regions with Manga-Bubble-YOLO's ONNX model."""

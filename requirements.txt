@@ -1,4 +1,4 @@
-# Python 3.11 is recommended for the smoothest compatibility with PyTorch.
+# Recommended runtime: 64-bit Python 3.11 on Windows.
 PySide6>=6.7,<7
-Pillow>=10.0
-manga-ocr>=0.1.16
+Pillow>=10.0,<13
+manga-ocr==0.1.16

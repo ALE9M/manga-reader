@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from PIL import Image, ImageOps
-from PySide6.QtCore import Qt, Signal, QSettings
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -86,7 +86,6 @@ class MangaReaderWindow(QMainWindow):
         self.regions: list[TextRegion] = []
         self.worker: OCRWorker | None = None
         self.detection_worker: DetectionWorker | None = None
-        self.settings = QSettings("ALE9M", "MangaReader")
         self._loading_editor = False
         self._syncing_list = False
 
@@ -114,7 +113,7 @@ class MangaReaderWindow(QMainWindow):
         self.open_button = QPushButton("Apri immagine…")
         self.open_button.setObjectName("Primary")
         self.detect_button = QPushButton("Rileva aree testo…")
-        self.detect_button.setToolTip("Rileva automaticamente blocchi e linee di testo con comic-text-detector")
+        self.detect_button.setToolTip("Rileva automaticamente le regioni di testo con Manga-Bubble-YOLO (ONNX).")
         self.ocr_selected_button = QPushButton("OCR selezionato")
         self.ocr_all_button = QPushButton("OCR di tutte le regioni")
         self.export_button = QPushButton("Esporta .txt")
@@ -295,7 +294,7 @@ class MangaReaderWindow(QMainWindow):
         self.statusBar().showMessage("Pagina caricata · Trascina sull’immagine per delimitare il primo balloon")
 
     def detect_regions(self) -> None:
-        """Detect text blocks with comic-text-detector without freezing the GUI."""
+        """Detect text regions with Manga-Bubble-YOLO without freezing the GUI."""
         if self.page_image is None:
             QMessageBox.information(self, "Nessuna pagina", "Apri prima una pagina manga.")
             return
@@ -312,69 +311,18 @@ class MangaReaderWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 return
 
-        # Prefer the files installed by setup_windows.bat; then try remembered paths.
         project_root = Path(__file__).resolve().parent.parent
-        bundled_repo = project_root / "vendor" / "comic-text-detector"
-        remembered_repo = Path(str(self.settings.value("detector/repository", "")))
-        repo_candidates = [
-            bundled_repo,
-            remembered_repo,
-            Path.home() / "comic-text-detector",
-        ]
-        repo_path = next(
-            (p for p in repo_candidates if str(p) and (p / "inference.py").is_file()),
-            None,
-        )
-        if repo_path is None:
-            selected_repo = QFileDialog.getExistingDirectory(
+        model_path = project_root / "models" / "yolo26n.onnx"
+        if not model_path.is_file():
+            QMessageBox.critical(
                 self,
-                "Seleziona la cartella comic-text-detector",
-                str(remembered_repo if remembered_repo.is_dir() else Path.home()),
-            )
-            if not selected_repo:
-                return
-            repo_path = Path(selected_repo)
-        if not (repo_path / "inference.py").is_file():
-            QMessageBox.warning(
-                self, "Cartella non valida",
-                "La cartella selezionata non contiene inference.py. Clona il repository "
-                "https://github.com/dmMaze/comic-text-detector e seleziona la cartella radice."
+                "Modello di rilevamento non trovato",
+                "Non trovo models/yolo26n.onnx. Chiudi Manga Reader ed esegui "
+                "setup_windows.bat per scaricare il modello e verificare le dipendenze.",
             )
             return
-        repository = str(repo_path)
-        self.settings.setValue("detector/repository", repository)
 
-        saved_model = str(self.settings.value("detector/model", ""))
-        candidates = [
-            project_root / "models" / "comictextdetector.pt.onnx",
-            project_root / "models" / "comictextdetector.pt",
-            Path(saved_model) if saved_model else None,
-            Path(repository) / "data" / "comictextdetector.pt.onnx",
-            Path(repository) / "data" / "comictextdetector.pt",
-            Path(repository) / "models" / "comictextdetector.pt.onnx",
-            Path(repository) / "models" / "comictextdetector.pt",
-            Path.home() / "models" / "comictextdetector.pt.onnx",
-            Path.home() / "models" / "comictextdetector.pt",
-        ]
-        model_path = next((p for p in candidates if p is not None and p.is_file()), None)
-        if model_path is None:
-            model_name, _ = QFileDialog.getOpenFileName(
-                self,
-                "Seleziona il checkpoint comic-text-detector",
-                str(Path(repository) / "data"),
-                "Modelli detector (*.onnx *.pt);;Tutti i file (*)",
-            )
-            if not model_name:
-                return
-            model_path = Path(model_name)
-        if model_path.suffix.lower() not in {".pt", ".onnx"}:
-            QMessageBox.warning(self, "Formato non riconosciuto", "Seleziona un file .pt oppure .onnx.")
-            return
-        self.settings.setValue("detector/model", str(model_path))
-
-        self.detection_worker = DetectionWorker(
-            self.page_image, repository, model_path, self
-        )
+        self.detection_worker = DetectionWorker(self.page_image, model_path, self)
         self.detection_worker.progress.connect(self.on_detection_progress)
         self.detection_worker.result_ready.connect(self.on_detection_result)
         self.detection_worker.fatal_error.connect(self.on_detection_error)
@@ -413,7 +361,7 @@ class MangaReaderWindow(QMainWindow):
     def on_detection_error(self, message: str) -> None:
         QMessageBox.critical(
             self, "Rilevamento automatico non riuscito",
-            f"{message}\n\nConsulta la sezione comic-text-detector nel README."
+            f"{message}\n\nConsulta la sezione Manga-Bubble-YOLO nel README."
         )
 
     def on_detection_finished(self) -> None:

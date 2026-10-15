@@ -16,3 +16,27 @@ jobs:
         run: python -m compileall -q main.py manga_reader
       - name: Run tests
         run: pytest -q
+
+  windows-dependency-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install PyTorch CPU for manga-ocr
+        run: python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+      - name: Install pinned application and ONNX dependencies
+        run: python -m pip install -r requirements.txt -r requirements-detector.txt
+      - name: Check package consistency and imports
+        run: |
+          python -m pip check
+          python -c "import numpy, onnxruntime, torch, PySide6; from manga_ocr import MangaOcr; print('NumPy', numpy.__version__, '| ONNX Runtime', onnxruntime.__version__, '| PyTorch', torch.__version__)"
+      - name: Download pinned Manga-Bubble-YOLO model
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force models | Out-Null
+          $uri = "https://huggingface.co/Kiuyha/Manga-Bubble-YOLO/resolve/fb646500455e8a8a3a807fd27b855c8e4fc63766/onnx/yolo26n.onnx?download=true"
+          Invoke-WebRequest -Uri $uri -OutFile "models/yolo26n.onnx"
+      - name: Validate ONNX model
+        run: python -c "import onnxruntime as ort; ort.InferenceSession('models/yolo26n.onnx', providers=['CPUExecutionProvider']); print('Manga-Bubble-YOLO ONNX model loaded')"
